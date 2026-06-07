@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RUMAH NAGA - Sistem Data Demplot, Fitopatologi & Sensor</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <style>
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background-color: #f3f4f6; font-family: 'Inter', sans-serif; }
+    .animate-in { animation: fadeIn 0.3s ease-out forwards; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.8); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .animate-scan { animation: pulse-ring 2s infinite; }
+    
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            agro: {
+              50: '#ecfdf5',
+              100: '#d1fae5',
+              500: '#10b981',
+              600: '#059669',
+              700: '#047857',
+              900: '#064e3b',
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- UTILITY COMPONENTS ---
+    async function fetchGeminiText(prompt) {
+      const apiKey = ""; // API Key disisipkan oleh environment
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      const retries = [1000, 2000, 4000, 8000, 16000];
+      
+      for (let i = 0; i <= retries.length; i++) {
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }]
+            })
+          });
+          if (!response.ok) throw new Error("API Error");
+          const data = await response.json();
+          return data.candidates?.[0]?.content?.parts?.[0]?.text || "Tidak ada respons dari AI.";
+        } catch (error) {
+          if (i === retries.length) return "Gagal terhubung ke AI setelah beberapa kali percobaan. Silakan coba lagi nanti.";
+          await new Promise(r => setTimeout(r, retries[i]));
+        }
+      }
+    }
+
+    // Komponen Icon menggunakan Lucide
+    function Icon({ name, size = 20, className = "" }) {
+      const iconRef = useRef(null);
+      useEffect(() => {
+        if (iconRef.current && window.lucide && window.lucide.icons[name]) {
+          iconRef.current.innerHTML = '';
+          const svg = window.lucide.icons[name].toSvg({
+            class: `lucide lucide-${name} ${className}`,
+            width: size,
+            height: size,
+          });
+          iconRef.current.innerHTML = svg;
+        }
+      }, [name, size, className]);
+      return <span ref={iconRef} className="inline-flex items-center justify-center"></span>;
+    }
+
+    function NavButton({ active, icon, label, onClick }) {
+      return (
+        <button onClick={onClick} className={`flex w-full items-center rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-200 ${
+            active ? "bg-agro-500 text-white shadow-md shadow-agro-500/30" : "text-gray-500 hover:bg-agro-50 hover:text-agro-600"
+        }`}>
+          <Icon name={icon} className="mr-3" /> {label}
+        </button>
+      );
+    }
+
+    function MobileNavButton({ active, icon, label, onClick }) {
+      return (
+        <button onClick={onClick} className={`flex flex-col items-center justify-center p-2 rounded-lg transition-colors flex-1 ${
+            active ? "text-agro-600" : "text-gray-400 hover:text-agro-500"
+        }`}>
+          <Icon name={icon} size={24} className={active ? "fill-agro-100" : ""} />
+          <span className="text-[10px] font-medium mt-1 truncate w-full text-center">{label}</span>
+        </button>
+      );
+    }
+
+    function AiCard({ icon, title, body }) {
+      return (
+        <div className="rounded-xl border border-agro-100 bg-gradient-to-br from-agro-50 to-white p-5 shadow-sm hover:shadow-md transition-shadow">
+          <h4 className="mb-2 flex items-center text-sm font-bold text-agro-900">
+            <Icon name={icon} size={18} className="mr-2 text-agro-600" /> {title}
+          </h4>
+          <p className="text-sm leading-relaxed text-gray-600">{body}</p>
+        </div>
+      );
+    }
+
+    // --- I18N DICTIONARY (KAMUS BAHASA) ---
+    const i18n = {
+      id: {
+        app_name: "RUMAH NAGA", role: "Agronomist Area",
+        menu_dashboard: "Dasbor", menu_farmers: "Data Petani", menu_diseases: "Kasus & Penyakit", menu_sensor: "Sensor & Nutrisi", menu_reports: "Laporan",
+        dash_title: "Ringkasan Dasbor", dash_subtitle: "Pantau aktivitas demplot dan perkembangan hasil panen terkini.",
+        stat_farmers: "Total Petani", stat_area: "Lahan Aktif", stat_harvest: "Panen Bulan Ini",
+        ai_recom: "Rekomendasi AI Terkini", ai_btn: "✨ Buat Laporan AI", ai_loading: "Menganalisis Data...", ai_insight: "Analisis & Rekomendasi Spesifik",
+        farmer_title: "Data Petani Demplot", farmer_subtitle: "Kelola data mitra petani dan pantau perkembangan lahannya.", farmer_add: "Tambah Petani",
+        tbl_name: "Nama Petani", tbl_commodity: "Komoditas", tbl_area: "Luas Lahan", tbl_status: "Status", tbl_action: "Aksi", btn_analysis: "Analisis",
+        disease_title: "Kasus & Penyakit (Fitopatologi)", disease_subtitle: "Database patogen dan pencatatan kasus anomali demplot di lapangan.", add_case: "Lapor Kasus Baru",
+        add_case_desc: "Dokumentasikan temuan anomali atau penyakit dari demplot petani.",
+        predict_btn: "✨ Prediksi Penyakit Cepat", predict_loading: "Menganalisis...", ai_guess: "Dugaan Sementara AI:",
+        case_title: "Laporan Kasus Lapangan", tbl_date: "Tanggal", tbl_symptom: "Gejala Singkat", btn_detail: "Detail & Resep",
+        kiai_title: "Tanya Kiai Nugroho", kiai_desc: "Konsultasikan gejala ini ke AI pakar fitopatologi (Kiai Nugroho) untuk mendapatkan resep penyelesaian yang bijak.", kiai_btn: "Minta Resep Kiai",
+        sensor_title: "Alat Sensor & Resep Naga Biru", sensor_subtitle: "Sinkronisasi data dari alat sensor tanah untuk menghitung dosis presisi Pupuk Naga Biru.",
+        sensor_scan_btn: "Mulai Pindai Sensor", sensor_scanning: "Membaca Data Alat...", calc_title: "Kalkulasi Presisi Pupuk Naga Biru",
+        export_title: "Ekspor Data Lengkap", plan_title: "Rencana Kerja Mingguan", plan_desc: "Buat jadwal dan prioritas kunjungan otomatis berdasarkan fase tanam petani saat ini menggunakan AI.", plan_btn: "✨ Generate Rencana AI", plan_loading: "Menyusun Jadwal...",
+        lang_name: "Bahasa Indonesia yang profesional"
+      },
+      en: {
+        app_name: "DRAGON HOUSE", role: "Area Agronomist",
+        menu_dashboard: "Dashboard", menu_farmers: "Farmers Data", menu_diseases: "Diseases", menu_sensor: "Sensor & Nutrition", menu_reports: "Reports",
+        dash_title: "Dashboard Summary", dash_subtitle: "Monitor demo plot activities and latest harvest progress.",
+        stat_farmers: "Total Farmers", stat_area: "Active Area", stat_harvest: "This Month Harvest",
+        ai_recom: "Latest AI Recommendations", ai_btn: "✨ Generate AI Report", ai_loading: "Analyzing Data...", ai_insight: "Specific Analysis & Recommendation",
+        farmer_title: "Demo Plot Farmers Data", farmer_subtitle: "Manage farmer partner data and monitor land progress.", farmer_add: "Add Farmer",
+        tbl_name: "Farmer Name", tbl_commodity: "Commodity", tbl_area: "Land Area", tbl_status: "Status", tbl_action: "Action", btn_analysis: "Analysis",
+        disease_title: "Cases & Diseases", disease_subtitle: "Pathogen database and field anomaly case recording.", add_case: "Report New Case",
+        add_case_desc: "Document anomalies or diseases found in the demo plot.",
+        predict_btn: "✨ Quick Disease Prediction", predict_loading: "Analyzing...", ai_guess: "AI Initial Guess:",
+        case_title: "Field Case Reports", tbl_date: "Date", tbl_symptom: "Brief Symptom", btn_detail: "Details & Recipe",
+        kiai_title: "Ask Kiai Nugroho", kiai_desc: "Consult this symptom to the AI phytopathology expert to get wise and organic treatment recipes.", kiai_btn: "Ask Kiai's Recipe",
+        sensor_title: "Sensor Tool & Blue Dragon Recipe", sensor_subtitle: "Sync data from the soil sensor tool to calculate precise Blue Dragon Fertilizer dosages.",
+        sensor_scan_btn: "Start Sensor Scan", sensor_scanning: "Reading Tool Data...", calc_title: "Blue Dragon Fertilizer Precision Calculation",
+        export_title: "Export Full Data", plan_title: "Weekly Work Plan", plan_desc: "Create an automated visit schedule and priority list based on current crop stages using AI.", plan_btn: "✨ Generate AI Plan", plan_loading: "Drafting Schedule...",
+        lang_name: "Professional English"
+      },
+      jv: {
+        app_name: "OMAH NAGA", role: "Penyuluh Tani",
+        menu_dashboard: "Beranda", menu_farmers: "Data Tani", menu_diseases: "Lelara", menu_sensor: "Sensor & Nutrisi", menu_reports: "Laporan",
+        dash_title: "Ringkesan Beranda", dash_subtitle: "Pantau kahanan lahan lan asil panen pungkasan.",
+        stat_farmers: "Gunggung Tani", stat_area: "Lahan Aktif", stat_harvest: "Panen Sasi Iki",
+        ai_recom: "Rekomendasi AI Anyar", ai_btn: "✨ Gawe Laporan AI", ai_loading: "Mriksa Data...", ai_insight: "Analisis & Rekomendasi Mligi",
+        farmer_title: "Data Tani Binaan", farmer_subtitle: "Atur data kanca tani lan pantau kahanan lahane.", farmer_add: "Tambah Tani",
+        tbl_name: "Jeneng Tani", tbl_commodity: "Tanduran", tbl_area: "Jembar", tbl_status: "Kahanan", tbl_action: "Aksi", btn_analysis: "Analisis",
+        disease_title: "Perkara & Lelara", disease_subtitle: "Cathetan lelara tanduran lan perkara ing tegalan.", add_case: "Lapor Perkara Anyar",
+        add_case_desc: "Cathet temuan anomali utawa lelara ing tegalan.",
+        predict_btn: "✨ Cek Lelara Gelis", predict_loading: "Mriksa...", ai_guess: "Dugaan AI Kanggo Saiki:",
+        case_title: "Laporan Perkara Tegalan", tbl_date: "Tanggal", tbl_symptom: "Tandha-tandha", btn_detail: "Rincian & Resep",
+        kiai_title: "Nyuwun Pirsa Kiai Nugroho", kiai_desc: "Nyuwun pituduh marang AI ahli lelara tanduran kanggo resep kang wicaksana.", kiai_btn: "Nyuwun Resep",
+        sensor_title: "Alat Sensor & Resep Naga Biru", sensor_subtitle: "Nyinkronake data saka piranti sensor lemah kanggo ngetung takeran Pupuk Naga Biru kang pas.",
+        sensor_scan_btn: "Miwiti Pindai Sensor", sensor_scanning: "Maca Data Piranti...", calc_title: "Itungan Presisi Pupuk Naga Biru",
+        export_title: "Unduh Data Jangkep", plan_title: "Jadwal Karya Minggon", plan_desc: "Damel jadwal lan prioritas sowan otomatis miturut umur tanduran migunakake AI.", plan_btn: "✨ Gawe Jadwal AI", plan_loading: "Nata Jadwal...",
+        lang_name: "Bahasa Jawa Krama Inggil ingkang sopan"
+      },
+      zh: {
+        app_name: "龙之屋 (NAGA)", role: "区域农学家",
+        menu_dashboard: "仪表板", menu_farmers: "农民数据", menu_diseases: "疾病", menu_sensor: "传感器与营养", menu_reports: "报告",
+        dash_title: "仪表板摘要", dash_subtitle: "监控示范区活动和最新收获进度。",
+        stat_farmers: "农民总数", stat_area: "活跃面积", stat_harvest: "本月收获",
+        ai_recom: "最新 AI 推荐", ai_btn: "✨ 生成 AI 报告", ai_loading: "正在分析数据...", ai_insight: "具体分析和建议",
+        farmer_title: "示范区农民数据", farmer_subtitle: "管理农民合作伙伴数据并监控土地进度。", farmer_add: "添加农民",
+        tbl_name: "农民姓名", tbl_commodity: "商品", tbl_area: "面积", tbl_status: "状态", tbl_action: "操作", btn_analysis: "分析",
+        disease_title: "病例和疾病", disease_subtitle: "病原体数据库和现场异常病例记录。", add_case: "报告新病例",
+        add_case_desc: "记录示范区发现的异常或疾病。",
+        predict_btn: "✨ 快速疾病预测", predict_loading: "正在分析...", ai_guess: "AI 初步猜测：",
+        case_title: "现场病例报告", tbl_date: "日期", tbl_symptom: "简要症状", btn_detail: "详情与处方",
+        kiai_title: "请教 Kiai Nugroho", kiai_desc: "向 AI 专家咨询此症状，获取明智且有机的处方。", kiai_btn: "请求处方",
+        sensor_title: "传感器工具与蓝龙处方", sensor_subtitle: "同步土壤传感器工具的数据，以计算精准的蓝龙肥料剂量。",
+        sensor_scan_btn: "开始传感器扫描", sensor_scanning: "读取工具数据中...", calc_title: "蓝龙肥料精准计算",
+        export_title: "导出完整数据", plan_title: "每周工作计划", plan_desc: "使用 AI 根据当前作物阶段自动创建访问时间表和优先级。", plan_btn: "✨ 生成 AI 计划", plan_loading: "正在制定时间表...",
+        lang_name: "专业的中文 (Mandarin)"
+      }
+    };
+
+    // --- MAIN APP COMPONENT ---
+
+    function App() {
+      const [lang, setLang] = useState("id");
+      const [activeTab, setActiveTab] = useState("reports"); // Default set ke reports untuk demo
+      const [viewMode, setViewMode] = useState("list"); 
+      
+      const t = (key) => i18n[lang][key] || i18n["id"][key];
+
+      // MOCK DATA
+      const farmers = [
+        { id: 1, name: "Budi Santoso", komoditas: "Padi Inpari 32", luas: 1.5, status: "Fase Vegetatif" },
+        { id: 2, name: "Siti Aminah", komoditas: "Jagung Manis", luas: 0.8, status: "Fase Generatif" },
+        { id: 3, name: "Ahmad Dahlan", komoditas: "Cabai Rawit", luas: 0.5, status: "Fase Vegetatif" },
+      ];
+
+      const [fieldCases, setFieldCases] = useState([
+        { id: 101, date: "20 Mei 2026", reporter: "Agronomist Reza", farmer: "Budi Santoso", crop: "Cabai Rawit", symptom: "Daun mengeriting ke atas, warna kuning mozaik", status: "Menunggu Analisis" },
+        { id: 102, date: "18 Mei 2026", reporter: "Agronomist Dina", farmer: "Siti Aminah", crop: "Jagung Manis", symptom: "Bercak coklat pada daun, menyebar cepat", status: "Telah Ditangani" }
+      ]);
+
+      // State AI Umum & Sensor
+      const [aiDashboardReport, setAiDashboardReport] = useState("");
+      const [isAiDashboardLoading, setIsAiDashboardLoading] = useState(false);
+      
+      const [sensorFarmerId, setSensorFarmerId] = useState(farmers[0].id);
+      const [sensorData, setSensorData] = useState(null);
+      const [isScanning, setIsScanning] = useState(false);
+      const [aiSensorReport, setAiSensorReport] = useState("");
+      const [isAiSensorLoading, setIsAiSensorLoading] = useState(false);
+
+      // State Penyakit & Kiai
+      const [kiaiResponse, setKiaiResponse] = useState("");
+      const [isKiaiLoading, setIsKiaiLoading] = useState(false);
+      const [selectedCase, setSelectedCase] = useState(null);
+
+      // STATE BARU: Prediksi Gejala (Add Case)
+      const [newCaseSymptom, setNewCaseSymptom] = useState("");
+      const [aiSymptomPrediction, setAiSymptomPrediction] = useState("");
+      const [isSymptomPredicting, setIsSymptomPredicting] = useState(false);
+
+      // STATE BARU: Rencana Kerja (Reports)
+      const [aiWeeklyPlan, setAiWeeklyPlan] = useState("");
+      const [isWeeklyPlanLoading, setIsWeeklyPlanLoading] = useState(false);
+
+      // AI Handlers
+      const handleGenerateDashboardReport = async () => {
+        setIsAiDashboardLoading(true);
+        const prompt = `Sebagai konsultan pertanian "RUMAH NAGA", buatkan ringkasan rekomendasi aksi. Total Petani 124, Lahan 45 Ha. Berikan saran operasional dan jawab seluruhnya menggunakan ${i18n[lang].lang_name}.`;
+        const result = await fetchGeminiText(prompt);
+        setAiDashboardReport(result);
+        setIsAiDashboardLoading(false);
+      };
+
+      const handleScanSensor = () => {
+        setIsScanning(true);
+        setSensorData(null);
+        setAiSensorReport("");
+        setTimeout(() => {
+          setSensorData({
+            n: Math.floor(Math.random() * 60) + 40,      
+            p: Math.floor(Math.random() * 40) + 20,      
+            k: Math.floor(Math.random() * 50) + 30,      
+            humidity: Math.floor(Math.random() * 40) + 45, 
+            temp: Math.floor(Math.random() * 12) + 24,   
+            ph: (Math.random() * 2 + 5.0).toFixed(1),    
+            fertility: ["Kurang", "Sedang", "Optimal"][Math.floor(Math.random() * 3)]
+          });
+          setIsScanning(false);
+        }, 2500); 
+      };
+
+      // Handler AI Sensor: Ringkas & To the Point
+      const handleAiSensorAnalysis = async () => {
+        setIsAiSensorLoading(true);
+        const selected = farmers.find(f => f.id == sensorFarmerId);
+        
+        const prompt = `Berperanlah sebagai "Bang Naga", ahli agronomi. Buatkan insight yang SANGAT SINGKAT dan TO THE POINT untuk lahan ${selected.name} (Tanaman: ${selected.komoditas}) berdasarkan data sensor ini: 
+        N(${sensorData.n}), P(${sensorData.p}), K(${sensorData.k}), pH(${sensorData.ph}), Suhu(${sensorData.temp}°C), Lembap(${sensorData.humidity}%), Kesuburan(${sensorData.fertility}).
+        
+        Wajib format jawaban dalam 3 poin singkat berikut:
+        1. 📊 Hasil: (Satu kalimat merangkum status nutrisi/tanah)
+        2. 🐉 Panduan Naga Biru: (Cara aplikasi terbaik sesuai kondisi suhu/lembap saat ini)
+        3. 💡 Saran: (Saran mendesak saja, misal tambah kapur jika pH < 6, atau tambah air jika kering. Jika normal, beri apresiasi).
+        
+        PENTING: Jangan bertele-tele. Jawab seluruhnya menggunakan ${i18n[lang].lang_name}.`;
+        
+        const result = await fetchGeminiText(prompt);
+        setAiSensorReport(result);
+        setIsAiSensorLoading(false);
+      };
+
+      const handleTanyaKiaiNugroho = async (kasus) => {
+        setIsKiaiLoading(true);
+        const prompt = `Berperanlah sebagai "Kiai Nugroho", seorang sesepuh ahli agronomi. Berikan "Resep Penyelesaian" untuk mengatasi gejala ${kasus.symptom} pada ${kasus.crop}. Jawab dengan sapaan hangat, diagnosis awal, resep organik/kimia, dan nasihat penutup. Jawab menggunakan ${i18n[lang].lang_name}.`;
+        const result = await fetchGeminiText(prompt);
+        setKiaiResponse(result);
+        setIsKiaiLoading(false);
+      };
+
+      // HANDLER BARU: Prediksi Gejala
+      const handlePredictSymptom = async () => {
+        if(!newCaseSymptom) return;
+        setIsSymptomPredicting(true);
+        const prompt = `Sebagai ahli fitopatologi RUMAH NAGA, berikan prediksi penyakit singkat (1 kalimat) dan 1 kemungkinan patogen berdasarkan gejala berikut: "${newCaseSymptom}". Jawab seluruhnya menggunakan ${i18n[lang].lang_name}.`;
+        const result = await fetchGeminiText(prompt);
+        setAiSymptomPrediction(result);
+        setIsSymptomPredicting(false);
+      };
+
+      // HANDLER BARU: Rencana Kerja Mingguan
+      const handleGenerateWeeklyPlan = async () => {
+        setIsWeeklyPlanLoading(true);
+        const farmersData = farmers.map(f => `- ${f.name} (${f.komoditas}, ${f.status})`).join('\n');
+        const prompt = `Sebagai asisten manajer pertanian RUMAH NAGA, buatkan Rencana Kerja Mingguan (To-Do List) ringkas untuk agronomis lapangan berdasarkan fase tanam berikut:\n${farmersData}\nBerikan 3-4 poin tugas spesifik (contoh: kunjungan, pemupukan susulan, persiapan panen). Format dengan emoji agar menarik. Jawab dalam ${i18n[lang].lang_name}.`;
+        const result = await fetchGeminiText(prompt);
+        setAiWeeklyPlan(result);
+        setIsWeeklyPlanLoading(false);
+      };
+
+      // --- RENDER FUNCTIONS ---
+      const LanguageDropdown = () => (
+        <select value={lang} onChange={(e) => { 
+          setLang(e.target.value); setAiDashboardReport(""); setAiSensorReport(""); setKiaiResponse(""); setAiSymptomPrediction(""); setAiWeeklyPlan("");
+        }} className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-lg focus:ring-agro-500 focus:border-agro-500 block w-full p-2 outline-none cursor-pointer">
+          <option value="id">🇮🇩 Indonesia</option>
+          <option value="en">🇬🇧 English</option>
+          <option value="jv">ꦗꦮ Basa Jawa</option>
+          <option value="zh">🇨🇳 中文</option>
+        </select>
+      );
+
+      const renderDashboard = () => (
+        <div className="animate-in space-y-6">
+          <header className="mb-8">
+            <h1 className="text-2xl font-bold text-gray-800">{t('dash_title')}</h1>
+            <p className="text-gray-500 text-sm">{t('dash_subtitle')}</p>
+          </header>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center">
+                <div className="p-4 rounded-full bg-blue-100 text-blue-600 mr-5"><Icon name="users" size={28} /></div>
+                <div><p className="text-sm font-medium text-gray-500">{t('stat_farmers')}</p><h3 className="text-2xl font-bold text-gray-800">124</h3></div>
+             </div>
+             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center">
+                <div className="p-4 rounded-full bg-agro-100 text-agro-600 mr-5"><Icon name="map" size={28} /></div>
+                <div><p className="text-sm font-medium text-gray-500">{t('stat_area')}</p><h3 className="text-2xl font-bold text-gray-800">45 Ha</h3></div>
+             </div>
+             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex items-center">
+                <div className="p-4 rounded-full bg-amber-100 text-amber-600 mr-5"><Icon name="wheat" size={28} /></div>
+                <div><p className="text-sm font-medium text-gray-500">{t('stat_harvest')}</p><h3 className="text-2xl font-bold text-gray-800">12 Ton</h3></div>
+             </div>
+          </div>
+        </div>
+      );
+
+      const renderDiseases = () => {
+        if (viewMode === "add-case") {
+          return (
+            <div className="animate-in max-w-2xl mx-auto">
+              <button onClick={() => { setViewMode("list"); setAiSymptomPrediction(""); setNewCaseSymptom(""); }} className="flex items-center text-gray-500 hover:text-gray-800 mb-6 font-medium text-sm transition-colors">
+                <Icon name="arrow-left" size={16} className="mr-2" /> Kembali
+              </button>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 sm:p-8">
+                <h2 className="text-xl font-bold text-gray-800 mb-2">{t('add_case')}</h2>
+                <p className="text-gray-500 text-sm mb-6 border-b pb-4">{t('add_case_desc')}</p>
+                
+                <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); alert("Data kasus berhasil ditambahkan!"); setViewMode("list"); }}>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pilih Lahan Petani</label>
+                    <select className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-agro-500 bg-white">
+                      {farmers.map(f => <option key={f.id}>{f.name} - {f.komoditas}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{t('tbl_symptom')}</label>
+                    <textarea 
+                      value={newCaseSymptom} 
+                      onChange={(e) => setNewCaseSymptom(e.target.value)} 
+                      rows="3" 
+                      className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-agro-500" 
+                      placeholder="Contoh: Daun menguning dan berlubang, ditemukan ulat..." 
+                      required
+                    ></textarea>
+                    
+                    {/* TOMBOL PREDIKSI AI BARU */}
+                    <button 
+                      type="button" 
+                      onClick={handlePredictSymptom} 
+                      disabled={isSymptomPredicting || !newCaseSymptom} 
+                      className="mt-3 text-sm bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-4 py-2 rounded-lg font-medium transition-colors flex items-center disabled:opacity-50"
+                    >
+                      <Icon name={isSymptomPredicting ? "loader-2" : "sparkles"} size={16} className={`mr-2 ${isSymptomPredicting ? "animate-spin" : ""}`} />
+                      {isSymptomPredicting ? t('predict_loading') : t('predict_btn')}
+                    </button>
+                    
+                    {aiSymptomPrediction && (
+                      <div className="mt-3 p-4 bg-indigo-50/70 border border-indigo-100 rounded-xl text-sm text-indigo-900 leading-relaxed shadow-sm animate-in">
+                        <strong>{t('ai_guess')}</strong><br/>{aiSymptomPrediction}
+                      </div>
+                    )}
+                  </div>
+                  <div className="pt-4 flex justify-end">
+                    <button type="submit" className="bg-agro-600 hover:bg-agro-700 text-white px-6 py-2.5 rounded-xl font-medium shadow-md transition-colors">
+                      Simpan Laporan
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          );
+        }
+
+        if (viewMode === "case-detail" && selectedCase) {
+          return (
+            <div className="animate-in max-w-4xl mx-auto space-y-6">
+              <button onClick={() => { setViewMode("list"); setKiaiResponse(""); }} className="flex items-center text-gray-500 hover:text-gray-800 font-medium text-sm transition-colors">
+                <Icon name="arrow-left" size={16} className="mr-2" /> Kembali
+              </button>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="p-6 border-b border-gray-100 bg-gray-50/50">
+                  <h2 className="text-2xl font-bold text-gray-800">{selectedCase.farmer}</h2>
+                  <p className="text-gray-600">{selectedCase.crop}</p>
+                </div>
+                <div className="p-6">
+                  <div className="bg-red-50 text-red-800 p-4 rounded-xl border border-red-100 text-sm leading-relaxed mb-6">"{selectedCase.symptom}"</div>
+                  <div className="mt-8 border-t border-gray-100 pt-6">
+                    <div className="bg-gradient-to-r from-emerald-800 to-emerald-600 rounded-2xl p-6 sm:p-8 text-white flex justify-between items-center shadow-lg">
+                      <div>
+                        <h3 className="text-xl font-bold mb-2 flex items-center"><Icon name="sparkles" size={24} className="mr-2 text-amber-300" /> {t('kiai_title')}</h3>
+                        <p className="text-emerald-100 text-sm max-w-md">{t('kiai_desc')}</p>
+                      </div>
+                      <button onClick={() => handleTanyaKiaiNugroho(selectedCase)} disabled={isKiaiLoading} className="bg-amber-400 hover:bg-amber-300 text-emerald-900 font-bold py-3 px-6 rounded-xl transition-colors shadow-md disabled:opacity-80 flex items-center">
+                        {isKiaiLoading ? <Icon name="loader-2" size={18} className="animate-spin" /> : <><Icon name="file-text" size={18} className="mr-2" /> {t('kiai_btn')}</>}
+                      </button>
+                    </div>
+                    {kiaiResponse && (
+                      <div className="mt-6 animate-in bg-[#fdfbf7] border-2 border-amber-200 rounded-2xl p-6 shadow-sm">
+                        <div className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap font-medium">{kiaiResponse}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="animate-in space-y-8">
+            <header className="flex justify-between items-center">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-800">{t('disease_title')}</h1>
+              </div>
+              <button onClick={() => setViewMode("add-case")} className="bg-red-500 hover:bg-red-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors flex items-center shadow-md shadow-red-500/20">
+                <Icon name="alert-triangle" size={18} className="mr-2" /> {t('add_case')}
+              </button>
+            </header>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+               <table className="w-full text-left border-collapse">
+                 <thead>
+                   <tr className="bg-gray-50 text-gray-500 text-sm border-b border-gray-100">
+                     <th className="px-6 py-4 font-medium">{t('tbl_date')}</th>
+                     <th className="px-6 py-4 font-medium">{t('tbl_name')}</th>
+                     <th className="px-6 py-4 font-medium">{t('tbl_symptom')}</th>
+                     <th className="px-6 py-4 font-medium text-right">{t('tbl_action')}</th>
+                   </tr>
+                 </thead>
+                 <tbody className="text-sm divide-y divide-gray-100">
+                   {fieldCases.map(kasus => (
+                     <tr key={kasus.id} className="hover:bg-gray-50/50">
+                       <td className="px-6 py-4 text-gray-600">{kasus.date}</td>
+                       <td className="px-6 py-4 font-medium text-gray-800">{kasus.farmer}<br/><span className="text-xs text-gray-500">{kasus.crop}</span></td>
+                       <td className="px-6 py-4 text-gray-600">{kasus.symptom}</td>
+                       <td className="px-6 py-4 text-right">
+                         <button onClick={() => { setSelectedCase(kasus); setViewMode("case-detail"); }} className="text-agro-600 font-medium bg-agro-50 px-3 py-1.5 rounded-lg">{t('btn_detail')}</button>
+                       </td>
+                     </tr>
+                   ))}
+                 </tbody>
+               </table>
+            </div>
+          </div>
+        );
+      }
+
+      const renderSensorTab = () => {
+        const selected = farmers.find(f => f.id == sensorFarmerId);
+        let nagaBiruBottles = 0, dosisPerTank = 0, tankCount = 0;
+        if (sensorData) {
+            const deficitN = Math.max(0, 100 - sensorData.n);
+            const deficitP = Math.max(0, 60 - sensorData.p);
+            const deficitK = Math.max(0, 70 - sensorData.k);
+            const luasAre = selected.luas * 100; 
+            const maxDefisit = Math.max(deficitN, deficitP, deficitK);
+            nagaBiruBottles = Math.ceil((maxDefisit / 15) * (luasAre / 20));
+            if(nagaBiruBottles < 1) nagaBiruBottles = 1;
+            dosisPerTank = maxDefisit > 40 ? 70 : 50;
+            tankCount = Math.ceil(luasAre / 5); 
+        }
+
+        return (
+          <div className="animate-in space-y-6 max-w-5xl mx-auto pb-10">
+            <header className="mb-6 border-b border-gray-100 pb-4">
+              <h1 className="text-2xl font-bold text-gray-800 flex items-center">
+                <Icon name="radio" size={28} className="mr-3 text-agro-600" /> {t('sensor_title')}
+              </h1>
+            </header>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center gap-5">
+              <select value={sensorFarmerId} onChange={(e) => { setSensorFarmerId(e.target.value); setSensorData(null); setAiSensorReport(""); }} className="w-1/2 bg-gray-50 border border-gray-200 rounded-xl p-3">
+                {farmers.map(f => <option key={f.id} value={f.id}>{f.name} - {f.komoditas} ({f.luas} Ha)</option>)}
+              </select>
+              <button onClick={handleScanSensor} disabled={isScanning} className="bg-agro-600 text-white font-bold py-3 px-8 rounded-full flex items-center">
+                {isScanning ? t('sensor_scanning') : <><Icon name="bluetooth" size={20} className="mr-2" /> {t('sensor_scan_btn')}</>}
+              </button>
+            </div>
+
+            {sensorData && (
+              <div className="animate-in space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-xl shadow-sm">Nitrogen: <b>{sensorData.n}</b> mg/kg</div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm">Fosfor: <b>{sensorData.p}</b> mg/kg</div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm">Kalium: <b>{sensorData.k}</b> mg/kg</div>
+                  <div className="bg-white p-4 rounded-xl shadow-sm">pH: <b>{sensorData.ph}</b></div>
+                </div>
+                <div className="mt-8 bg-gradient-to-br from-blue-900 to-indigo-900 rounded-2xl overflow-hidden shadow-xl text-white">
+                  <div className="p-6 md:p-8">
+                     <h2 className="text-2xl font-bold mb-6">{t('calc_title')}</h2>
+                     <div className="grid grid-cols-3 gap-6 bg-white/10 rounded-xl p-6">
+                        <div className="text-center"><p className="text-5xl font-bold mb-2">{nagaBiruBottles}</p><p className="text-sm">Botol</p></div>
+                        <div className="text-center"><p className="text-5xl font-bold mb-2">{dosisPerTank}</p><p className="text-sm">ml / Tangki</p></div>
+                        <div className="text-center"><p className="text-5xl font-bold mb-2">{tankCount}</p><p className="text-sm">Tangki (Sesi)</p></div>
+                     </div>
+                  </div>
+                  <div className="bg-blue-950/50 p-4 px-6 border-t border-white/10 flex justify-between items-center">
+                     <button onClick={handleAiSensorAnalysis} disabled={isAiSensorLoading} className="bg-amber-500 hover:bg-amber-400 text-indigo-950 font-bold py-2.5 px-6 rounded-xl flex items-center">
+                       {isAiSensorLoading ? <Icon name="loader-2" className="animate-spin mr-2" /> : <Icon name="sparkles" className="mr-2" />} 
+                       TANYA KE BANG NAGA
+                     </button>
+                  </div>
+                </div>
+                {aiSensorReport && (
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-6 shadow-sm">
+                    <div className="text-gray-800 text-sm whitespace-pre-wrap font-medium">{aiSensorReport}</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // RENDER BARU: Menu Laporan & Rencana Kerja
+      const renderReportsTab = () => (
+        <div className="animate-in space-y-6">
+          <header className="mb-6 border-b border-gray-100 pb-4">
+            <h1 className="text-2xl font-bold text-gray-800 flex items-center">
+              <Icon name="file-text" size={28} className="mr-3 text-agro-600" />
+              {t('menu_reports')}
+            </h1>
+          </header>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
+               <div className="bg-gray-50 h-20 w-20 rounded-full flex items-center justify-center mb-4 text-gray-400">
+                  <Icon name="folder-down" size={32} />
+               </div>
+               <h2 className="text-lg font-bold text-gray-800 mb-2">{t('export_title')}</h2>
+               <div className="flex gap-3 mt-4">
+                 <button className="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center"><Icon name="file-spreadsheet" size={16} className="mr-2"/> Excel</button>
+                 <button className="bg-red-500 text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center"><Icon name="file-text" size={16} className="mr-2"/> PDF</button>
+               </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 p-6 rounded-2xl shadow-sm border border-indigo-100 flex flex-col">
+               <div className="flex items-center mb-4">
+                 <div className="bg-indigo-100 p-2 rounded-lg text-indigo-600 mr-3"><Icon name="calendar-days" size={24}/></div>
+                 <h2 className="text-lg font-bold text-indigo-900">{t('plan_title')}</h2>
+               </div>
+               <p className="text-indigo-700/80 text-sm mb-4 flex-1">{t('plan_desc')}</p>
+               
+               {aiWeeklyPlan && (
+                 <div className="bg-white/90 p-4 rounded-xl border border-white/50 text-sm text-gray-800 mb-4 whitespace-pre-wrap leading-relaxed shadow-sm animate-in">
+                   {aiWeeklyPlan}
+                 </div>
+               )}
+
+               <button 
+                 onClick={handleGenerateWeeklyPlan}
+                 disabled={isWeeklyPlanLoading}
+                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all shadow-md flex items-center justify-center disabled:opacity-70"
+               >
+                 <Icon name={isWeeklyPlanLoading ? "loader-2" : "sparkles"} size={18} className={`mr-2 ${isWeeklyPlanLoading ? "animate-spin" : ""}`} />
+                 {isWeeklyPlanLoading ? t('plan_loading') : t('plan_btn')}
+               </button>
+            </div>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="flex h-screen overflow-hidden bg-[#f8fafc]">
+          {/* SIDEBAR */}
+          <aside className="hidden md:flex w-64 flex-col bg-white border-r border-gray-100 shadow-sm z-10">
+            <div className="flex items-center h-20 px-6 border-b border-gray-50">
+              <div className="bg-agro-600 p-2 rounded-lg mr-3"><Icon name="sprout" size={24} className="text-white" /></div>
+              <h1 className="text-xl font-bold tracking-tight text-gray-800">RUMAH <span className="text-agro-600">NAGA</span></h1>
+            </div>
+            
+            <nav className="flex-1 space-y-2 px-4 py-6 overflow-y-auto">
+              <NavButton active={activeTab === "dashboard"} icon="layout-dashboard" label={t('menu_dashboard')} onClick={() => { setActiveTab("dashboard"); setViewMode("list"); }} />
+              <NavButton active={activeTab === "farmers"} icon="users" label={t('menu_farmers')} onClick={() => { setActiveTab("farmers"); setViewMode("list"); }} />
+              <NavButton active={activeTab === "diseases"} icon="bug" label={t('menu_diseases')} onClick={() => { setActiveTab("diseases"); setViewMode("list"); }} />
+              <NavButton active={activeTab === "sensor"} icon="radio" label={t('menu_sensor')} onClick={() => { setActiveTab("sensor"); setViewMode("list"); }} />
+              <NavButton active={activeTab === "reports"} icon="file-text" label={t('menu_reports')} onClick={() => { setActiveTab("reports"); setViewMode("list"); }} />
+            </nav>
+
+            <div className="p-4 border-t border-gray-50">
+              <div className="mb-4"><LanguageDropdown /></div>
+              <div className="flex items-center px-2 py-2">
+                <img src="https://ui-avatars.com/api/?name=Agronomist&background=10b981&color=fff" alt="User" className="h-9 w-9 rounded-full object-cover mr-3" />
+                <div><p className="text-sm font-semibold text-gray-800">Reza Pahlawan</p><p className="text-xs text-gray-500">{t('role')}</p></div>
+              </div>
+            </div>
+          </aside>
+
+          {/* MAIN CONTENT AREA */}
+          <div className="flex flex-1 flex-col overflow-hidden relative">
+            <header className="md:hidden flex items-center justify-between bg-white h-16 px-4 shadow-sm z-10">
+              <div className="flex items-center">
+                <div className="bg-agro-600 p-1.5 rounded-md mr-2"><Icon name="sprout" size={20} className="text-white" /></div>
+                <h1 className="text-lg font-bold text-gray-800">RUMAH NAGA</h1>
+              </div>
+              <div className="w-24"><LanguageDropdown /></div>
+            </header>
+
+            <main className="flex-1 overflow-x-hidden overflow-y-auto p-4 md:p-8 pb-24 md:pb-8">
+              {activeTab === "dashboard" && renderDashboard()}
+              {activeTab === "diseases" && renderDiseases()}
+              {activeTab === "sensor" && renderSensorTab()}
+              {activeTab === "reports" && renderReportsTab()}
+              {activeTab === "farmers" && (
+                <div className="text-center p-10 bg-white rounded-xl">Silakan buka tab "Sensor", "Penyakit" atau "Laporan" untuk mencoba AI terbaru.</div>
+              )}
+            </main>
+
+            {/* BOTTOM NAV (Mobile) */}
+            <nav className="md:hidden absolute bottom-0 w-full bg-white border-t border-gray-200 flex justify-between px-2 py-2 pb-safe z-20">
+              <MobileNavButton active={activeTab === "dashboard"} icon="layout-dashboard" label={t('menu_dashboard')} onClick={() => setActiveTab("dashboard")} />
+              <MobileNavButton active={activeTab === "sensor"} icon="radio" label={t('menu_sensor')} onClick={() => setActiveTab("sensor")} />
+              <MobileNavButton active={activeTab === "diseases"} icon="bug" label={t('menu_diseases')} onClick={() => setActiveTab("diseases")} />
+              <MobileNavButton active={activeTab === "reports"} icon="file-text" label={t('menu_reports')} onClick={() => setActiveTab("reports")} />
+            </nav>
+          </div>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
